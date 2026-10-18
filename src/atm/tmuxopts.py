@@ -181,9 +181,20 @@ class TmuxOptsResult:
     sourced: tuple[str, ...] = ()
 
 
+def resolve_format(value: str) -> str:
+    """把 "auto" 落成实际要写的格式：运行中的 tmux 支持就用 csi-u，否则空串（不写）。
+
+    支持与否只信 server 自己的回答（版本 3.5+ 且能读到该选项）；读不到 server 时也不写，
+    因为 tmux 3.4 不认 extended-keys-format，写进配置文件会让 server 启动报错。
+    """
+    if value != "auto":
+        return value
+    return "csi-u" if tmux.key_options_status().format_support == "supported" else ""
+
+
 def require_format_support(value: str) -> None:
     """非空格式必须在任何文件写入/备份前验证；空串撤回接管永不阻塞。"""
-    if not value:
+    if not value or value == "auto":
         return
     config_mod.set_value(config_mod.Config(), "tmux.extended-keys-format", value)
     status = tmux.key_options_status()
@@ -196,14 +207,16 @@ def require_format_support(value: str) -> None:
 
 
 def build_plan(cfg: config_mod.Config, *, conf_path: Path | None = None) -> TmuxOptsPlan:
-    require_format_support(cfg.tmux_extended_keys_format)
+    key_format = resolve_format(cfg.tmux_extended_keys_format)
+    require_format_support(key_format)
     path = conf_path or Path.home() / ".tmux.conf"
     existing = _read(path)
     already = _has_marker(existing, MARKER_BEGIN)
     enabled: list[str] = []
     commands: list[tuple[str, ...]] = []
     for name, spec in SPECS.items():
-        value = getattr(cfg, spec.field)
+        is_format = spec.field == "tmux_extended_keys_format"
+        value = key_format if is_format else getattr(cfg, spec.field)
         if spec.active(value):
             enabled.append(name)
             commands.extend(tuple(argv) for argv in spec.on(value))
@@ -264,7 +277,9 @@ def apply(plan: TmuxOptsPlan, *, live: bool = True) -> TmuxOptsResult:
                         live_error = tmux.key_options_reason(tmux.KeyOptionsCause.READBACK_MISMATCH)
                         break
                 applied_live = live_error is None
-        elif key_commands:
+        elif any(a[2] == "extended-keys-format" for a in key_commands):
+            # 只有显式格式需要 server 现场确认；extended-keys 本身（tmux 3.2+）
+            # 下次起 server 就生效，而 auto 在没有 server 时根本不会写格式。
             live_error = _("目标 tmux server 不可用，运行中的扩展键设置未确认")
     # 重新读一遍写完后的文件再扫：行号必须对得上用户现在看到的文件
     final = _read(plan.conf_path)

@@ -1427,7 +1427,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
             print(_("tmux 选项没写进 {path}：{exc}").format(path=plan.conf_path, exc=exc))
             return EXIT_ERROR
         _report_tmuxopts(opts_result)
-        format_confirmed = not cfg.tmux_extended_keys_format or opts_result.applied_live
+        # 只有真的写了格式（显式值，或 auto 在 3.5+ 上落成 csi-u）才需要现场确认。
+        writes_format = any(a[2] == "extended-keys-format" for a in opts_plan.commands)
+        format_confirmed = not writes_format or opts_result.applied_live
     _apply_boot_hook(cfg, conf_path)
     return EXIT_OK if format_confirmed else EXIT_ERROR
 

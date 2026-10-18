@@ -97,18 +97,21 @@ def test_tmux_keys_roundtrip_and_env(cfg_path: Path, monkeypatch) -> None:
         config.set_value(cfg, "tmux.mouse", "maybe")
 
 
-def test_extended_keys_is_opt_in_and_roundtrips(cfg_path: Path, monkeypatch) -> None:
-    assert config.Config().tmux_extended_keys is False
-    cfg = config.set_value(config.Config(), "tmux.extended-keys", "true")
+def test_extended_keys_default_on_and_can_be_turned_off(cfg_path: Path, monkeypatch) -> None:
+    # On by default since 2026-10-18 (Pi / Claude Code need Shift+Enter); the format
+    # defaults to "auto": csi-u only where the running tmux supports it.
+    assert config.Config().tmux_extended_keys is True
+    assert config.Config().tmux_extended_keys_format == "auto"
+    cfg = config.set_value(config.Config(), "tmux.extended-keys", "false")
     config.save(cfg)
     loaded, sources = config.load_with_sources()
-    assert loaded.tmux_extended_keys and sources["tmux.extended-keys"] == "file"
-    assert "extended_keys = true" in cfg_path.read_text(encoding="utf-8")
-    monkeypatch.setenv("ATM_TMUX_EXTENDED_KEYS", "false")
+    assert not loaded.tmux_extended_keys and sources["tmux.extended-keys"] == "file"
+    assert "extended_keys = false" in cfg_path.read_text(encoding="utf-8")
+    monkeypatch.setenv("ATM_TMUX_EXTENDED_KEYS", "true")
     loaded, sources = config.load_with_sources()
-    assert not loaded.tmux_extended_keys
+    assert loaded.tmux_extended_keys
     assert sources["tmux.extended-keys"] == "env ATM_TMUX_EXTENDED_KEYS"
-    assert not config.unset_value(cfg, "tmux.extended-keys").tmux_extended_keys
+    assert config.unset_value(cfg, "tmux.extended-keys").tmux_extended_keys  # back to default
     with pytest.raises(config.ConfigError):
         config.set_value(cfg, "tmux.extended-keys", "maybe")
 

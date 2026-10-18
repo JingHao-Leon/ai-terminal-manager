@@ -12,6 +12,17 @@ import pytest
 
 from atm import config, conflicts, sync, tmux, tmuxopts
 
+
+def off(**overrides):
+    """Every atm tmux option off — the baseline these tests were written against.
+
+    Extended keys default on since 2026-10-18; tests about other options pin them off.
+    """
+    return config.Config(
+        **{"tmux_extended_keys": False, "tmux_extended_keys_format": "", **overrides}
+    )
+
+
 MOUSE = {"mouse": "tmux.mouse"}
 
 
@@ -179,10 +190,10 @@ def test_turning_an_option_off_no_longer_claims_it_is_off(tmp_path: Path, monkey
     monkeypatch.setattr(tmux, "has_server", lambda: False)
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g mouse on   # 我自己写的\n", encoding="utf-8")
-    on = config.Config(tmux_mouse=True)
+    on = off(tmux_mouse=True)
     tmuxopts.apply(tmuxopts.build_plan(on, conf_path=conf))
 
-    notes = "\n".join(sync.apply_changes(on, config.Config(), conf_path=conf))
+    notes = "\n".join(sync.apply_changes(on, off(), conf_path=conf))
 
     assert "不再管" in notes
     assert "仍然在设" in notes
@@ -195,7 +206,7 @@ def test_enabling_an_option_warns_that_a_later_line_wins(tmp_path: Path, monkeyp
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g history-limit 50000\n", encoding="utf-8")
 
-    plan = tmuxopts.build_plan(config.Config(tmux_history_limit=10000), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_history_limit=10000), conf_path=conf)
     described = plan.describe()
 
     assert [c.line_no for c in plan.conflicts] == [1]
@@ -207,7 +218,7 @@ def test_no_conflict_no_noise(tmp_path: Path, monkeypatch) -> None:
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g status off\n", encoding="utf-8")
 
-    plan = tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf)
 
     assert plan.conflicts == ()
     assert "也设了同样的选项" not in plan.describe()
@@ -288,7 +299,7 @@ def test_reported_line_numbers_match_the_file_after_the_write(tmp_path: Path, mo
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g mouse off\n", encoding="utf-8")
 
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
 
     lines = conf.read_text(encoding="utf-8").splitlines()
     assert [c.line_no for c in result.conflicts] == [
@@ -303,7 +314,7 @@ def test_report_never_claims_an_outcome_it_did_not_verify(tmp_path: Path, monkey
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g mouse on\n", encoding="utf-8")
 
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
     text = "\n".join(tmuxopts.report_lines(result))
 
     assert "说了算" not in text  # 不断言谁最终赢
@@ -318,7 +329,7 @@ def test_scope_caveat_appears_even_with_no_other_files(tmp_path: Path, monkeypat
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g mouse on\n", encoding="utf-8")
 
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
 
     assert result.other_files == ()
     assert any("atm 只看了" in line for line in tmuxopts.report_lines(result))
@@ -329,10 +340,10 @@ def test_uncertain_released_conflicts_are_still_reported(tmp_path: Path, monkeyp
     monkeypatch.setattr(tmux, "has_server", lambda: False)
     conf = tmp_path / "tmux.conf"
     conf.write_text("%if 1\nset -g mouse on\n%endif\n", encoding="utf-8")
-    on = config.Config(tmux_mouse=True)
+    on = off(tmux_mouse=True)
     tmuxopts.apply(tmuxopts.build_plan(on, conf_path=conf))
 
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(), conf_path=conf))
     text = "\n".join(tmuxopts.report_lines(result))
 
     assert [c.certain for c in result.released] == [False]
@@ -346,9 +357,9 @@ def test_install_path_reports_released_conflicts_too(tmp_path: Path, monkeypatch
     monkeypatch.setattr(tmux, "has_server", lambda: False)
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g mouse on\n", encoding="utf-8")
-    tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
 
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(), conf_path=conf))
     cli._report_tmuxopts(result)
 
     out = capsys.readouterr().out

@@ -10,6 +10,16 @@ import pytest
 from atm import config, dispatch, guard, install, sync, tmux, tmuxopts
 
 
+def off(**overrides):
+    """Every atm tmux option off — the baseline these tests were written against.
+
+    Extended keys default on since 2026-10-18; tests about other options pin them off.
+    """
+    return config.Config(
+        **{"tmux_extended_keys": False, "tmux_extended_keys_format": "", **overrides}
+    )
+
+
 @pytest.fixture
 def conf(tmp_path: Path, monkeypatch) -> Path:
     p = tmp_path / "tmux.conf"
@@ -20,13 +30,13 @@ def conf(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_no_change_no_action(conf: Path) -> None:
-    cfg = config.Config()
+    cfg = off()
     assert sync.apply_changes(cfg, cfg, conf_path=conf) == []
     assert conf.read_text(encoding="utf-8") == "set -g status off\n"
 
 
 def test_tmux_change_writes_block(conf: Path) -> None:
-    old = config.Config()
+    old = off()
     new = replace(old, tmux_mouse=True)
     notes = sync.apply_changes(old, new, conf_path=conf)
     assert any("tmux 选项已写进" in n for n in notes)
@@ -34,7 +44,7 @@ def test_tmux_change_writes_block(conf: Path) -> None:
 
 
 def test_extended_keys_change_syncs_tmux_option(conf: Path) -> None:
-    old = config.Config()
+    old = off()
     new = replace(old, tmux_extended_keys=True)
     notes = sync.apply_changes(old, new, conf_path=conf)
     assert any("tmux 选项已写进" in note for note in notes)
@@ -44,7 +54,7 @@ def test_extended_keys_change_syncs_tmux_option(conf: Path) -> None:
 
 
 def test_key_change_without_install_only_hints(conf: Path) -> None:
-    old = config.Config()
+    old = off()
     new = replace(old, keys_pick="s")
     notes = sync.apply_changes(old, new, conf_path=conf)
     assert len(notes) == 1 and "atm install" in notes[0]
@@ -55,7 +65,7 @@ def test_key_change_after_install_rebinds_and_unbinds_old(conf: Path, monkeypatc
     calls: list[list[str]] = []
     monkeypatch.setattr(tmux, "has_server", lambda: True)
     monkeypatch.setattr(tmux, "run", lambda args, **kw: calls.append(list(args)) or "")
-    old = config.Config()
+    old = off()
     install.apply(install.build_plan(cfg=old, conf_path=conf))
     calls.clear()
     new = replace(old, keys_pick="s")
@@ -69,7 +79,7 @@ def test_key_change_after_install_rebinds_and_unbinds_old(conf: Path, monkeypatc
 
 
 def test_slice_change_without_cgroup_just_notes(conf: Path) -> None:
-    old = config.Config()
+    old = off()
     new = replace(old, memory_slice_high="10G")
     notes = sync.apply_changes(old, new, conf_path=conf)
     assert len(notes) == 1 and "cgroup" in notes[0]
@@ -82,7 +92,7 @@ def test_slice_change_updates_our_unit_but_not_users(
     monkeypatch.setattr(dispatch, "memory_limits_available", lambda: True)
     monkeypatch.setattr(guard, "unit_dir", lambda: units)
     monkeypatch.setattr(guard, "_daemon_reload", lambda: None)
-    old = config.Config()
+    old = off()
     new = replace(old, memory_slice_high="10G", memory_slice_max="12G")
     notes = sync.apply_changes(old, new, conf_path=conf)
     assert any("写入" in n and "MemoryHigh=10G" in n for n in notes)

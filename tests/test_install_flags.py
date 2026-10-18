@@ -32,7 +32,9 @@ def test_bare_install_never_asks_beyond_confirm(env: Path, monkeypatch) -> None:
     assert len(asked) == 1 and "继续" in asked[0]
     text = env.read_text(encoding="utf-8")
     assert f"bind-key {install.DEFAULT_KEY} " in text
-    assert tmuxopts.MARKER_BEGIN not in text  # tmux.* 默认全关
+    # Only the default-on extended keys; no server here, so no format is written.
+    assert "set -g extended-keys on" in text and "extended-keys-format" not in text
+    assert "set -g mouse" not in text
     assert config.load().keys_conf_path == str(env)  # --conf 的安装位置供后续同步使用
 
 
