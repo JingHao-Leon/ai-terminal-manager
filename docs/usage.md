@@ -177,25 +177,26 @@ atm config                     # interactive editor: ↑↓ pick a key, Enter ed
 atm config memory.high 4G      # soft cap: throttle + reclaim, never kills. Default auto = 80% of max
 atm config keys.pick s         # picker key (uppercase = current dir only); keys.sidebar, keys.health, keys.popup-width/-height too. Saving rebinds the running server
 atm config tmux.mouse true     # common tmux options: mouse / focus-events / history-limit / base-index / renumber-windows → own block in ~/.tmux.conf, applied live. If your own lines set the same option, atm names them with line numbers instead of silently losing to them
-atm config tmux.extended-keys true  # opt in to extended-keys on for modified keys (e.g. Shift+Enter); requires tmux/terminal support
+atm config tmux.extended-keys false  # extended keys are on by default (Shift+Enter etc.); this turns them off
 atm config memory.slice-high 20G  # aggregate slice numbers (default auto = 50% / 65% of RAM); the unit atm wrote is rewritten + daemon-reload
 atm config memory.max 8G       # hard cap: kills the whole session scope (children included). Default auto = 35% of RAM, floor 4G
 atm claude --resume <id>       # launches claude inside that cgroup; args pass through untouched
 claude                         # no prefix = native, no limits at all
 ```
 
-`tmux.extended-keys` remains off by default. `tmux.extended-keys-format` defaults to `""`
-(unmanaged); allowed values are `""`, `xterm`, and `csi-u`. For Pi, on a **running, verified
-compatible tmux 3.5+ server**, opt in separately:
+`tmux.extended-keys` is on by default. `tmux.extended-keys-format` defaults to `auto`: on a
+**running, verified compatible tmux 3.5+ server** it writes `csi-u` (what Pi recommends);
+otherwise it writes no format line. Allowed values are `auto`, `""` (unmanaged), `xterm` and
+`csi-u`:
 
 ```bash
-atm config tmux.extended-keys true
-atm config tmux.extended-keys-format csi-u
-atm config --unset tmux.extended-keys-format  # release ownership, not reset the live value
+atm config tmux.extended-keys-format csi-u    # explicit; refused unless the server confirms support
+atm config tmux.extended-keys-format ""       # release ownership, not reset the live value
+atm config --unset tmux.extended-keys-format  # back to auto
 ```
 
 ATM probes the **target server** through the public CLI (`#{version}` and `show-options`), not
-just the PATH client's `tmux -V`. Nonempty format requests are refused before saving TOML or
+just the PATH client's `tmux -V`. Explicit `xterm`/`csi-u` requests are refused before saving TOML or
 changing the tmux block when support is unknown/unsupported (including no running server).
 On tmux 3.2–3.4, use only `extended-keys on`; 3.4 rejects the format option, and Pi supports
 its older xterm `modifyOtherKeys` path. ATM does not force `always` or wildcard terminal features.

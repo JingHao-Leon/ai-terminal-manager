@@ -90,11 +90,11 @@ atm install     # 往 ~/.tmux.conf 写键位 + 装 resurrect/continuum。先把�
 
 界面语言跟系统 locale（中 / 英 / 日），`ATM_LANG=zh|en|ja` 可强制。
 
-可选的组合键支持：`atm config tmux.extended-keys true` 在 atm 管的块里写入
-`extended-keys on`，live 应用后读回确认；仍默认关闭。独立的 `tmux.extended-keys-format`
-默认 `""`（不接管），只有运行中的 tmux 3.5+ 通过公开版本/选项探测后才可 opt-in
-`csi-u` 或 `xterm`。未知/不支持时在保存前拒绝；tmux 3.4 仍只用原有的 `extended-keys on`
-路径，不写格式行。探测的是目标 server，不是 PATH 客户端版本。关掉只删 atm 的行，不动 live 值。
+组合键支持默认开：atm 管的块里写入 `extended-keys on`，live 应用后读回确认——Pi、
+Claude Code 的 Shift+Enter 等组合键需要它。独立的 `tmux.extended-keys-format` 默认 `auto`：
+运行中的 tmux 3.5+ 通过公开版本/选项探测就用 `csi-u`，否则不写格式行（tmux 3.4 的配置文件
+不认这一行）。显式的 `csi-u` 或 `xterm` 在支持未知/不支持时保存前拒绝；`""` 表示不接管，
+`tmux.extended-keys false` 关掉组合键。探测的是目标 server，不是 PATH 客户端版本。关掉只删 atm 的行，不动 live 值。
 atm 不为消除警告重启 server；外层终端/客户端组合键能力未验证，设置成功不证明真实 Shift+Enter 可用。
 详见[组合键配置](https://github.com/lyfuci/ai-terminal-manager/blob/main/docs/usage-cn.md#内存闸门atm-claude-和-claude-的区别)。
 

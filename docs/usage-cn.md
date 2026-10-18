@@ -170,24 +170,25 @@ atm config                     # 交互式编辑器：↑↓ 选键，Enter 改/
 atm config memory.high 4G      # 软上限：节流 + 回收，不杀。默认 auto = Max 的 80%
 atm config keys.pick s         # 选择器键（大写 = 只看当前目录）；还有 keys.sidebar、keys.health、keys.popup-width/-height。保存即对运行中的 server 重绑
 atm config tmux.mouse true     # tmux 常用选项：mouse / focus-events / history-limit / base-index / renumber-windows → 写进 ~/.tmux.conf 的独立块，立即生效。你自己的行要是也设了同一个选项，atm 会连行号一起报出来，而不是默默被盖掉
-atm config tmux.extended-keys true  # 可选：extended-keys on；Shift+Enter 等组合键需 tmux/终端支持
+atm config tmux.extended-keys false  # 组合键默认开（Shift+Enter 等）；这条是关掉
 atm config memory.slice-high 20G  # 总量 slice 的数（默认 auto = 物理内存 50% / 65%）；atm 写的单元会重写 + daemon-reload
 atm config memory.max 8G       # 硬上限：杀整个会话 scope（含子进程）。默认 auto = 物理内存 35%，下限 4G
 atm claude --resume <id>       # 在这个 cgroup 里启动 claude；参数原样透传
 claude                         # 不带前缀 = 原生，不套任何限制
 ```
 
-`tmux.extended-keys` 仍默认关闭。`tmux.extended-keys-format` 默认 `""`（不接管），
-可选 `""`、`xterm`、`csi-u`。Pi 用户在**运行中且验证支持的 tmux 3.5+ server** 上可分别开启：
+`tmux.extended-keys` 默认开。`tmux.extended-keys-format` 默认 `auto`：在**运行中且验证支持的
+tmux 3.5+ server** 上写 `csi-u`（Pi 推荐的格式），否则不写格式行。可选 `auto`、`""`（不接管）、
+`xterm`、`csi-u`：
 
 ```bash
-atm config tmux.extended-keys true
-atm config tmux.extended-keys-format csi-u
-atm config --unset tmux.extended-keys-format  # 撤回接管，不重置运行中的值
+atm config tmux.extended-keys-format csi-u    # 显式指定；server 确认支持才写
+atm config tmux.extended-keys-format ""       # 撤回接管，不重置运行中的值
+atm config --unset tmux.extended-keys-format  # 回到 auto
 ```
 
 atm 通过公开 CLI（`#{version}` 和 `show-options`）探测**当前目标 server**，不把 PATH 客户端的
-`tmux -V` 当作 server 真相。非空格式在支持未知/不支持（含没有运行中的 server）时，
+`tmux -V` 当作 server 真相。显式的 `xterm`/`csi-u` 在支持未知/不支持（含没有运行中的 server）时，
 会在保存 TOML 或修改 tmux 块前拒绝。tmux 3.2–3.4 只用 `extended-keys on`；
 3.4 不支持格式选项，Pi 支持它的旧 xterm `modifyOtherKeys` 路径。atm 不强制 `always`，不加通配终端能力。
 

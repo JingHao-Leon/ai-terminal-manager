@@ -174,25 +174,25 @@ atm config                     # 対話エディタ：↑↓ でキー選択、E
 atm config memory.high 4G      # ソフト上限：スロットリング + 回収、殺さない。既定 auto = Max の 80%
 atm config keys.pick s         # ピッカーキー（大文字 = 現在のディレクトリのみ）；keys.sidebar、keys.health、keys.popup-width/-height も。保存で実行中の server に再割り当て
 atm config tmux.mouse true     # tmux 共通オプション：mouse / focus-events / history-limit / base-index / renumber-windows → ~/.tmux.conf に独立ブロック、即時適用。あなた自身の行が同じオプションを設定していれば、黙って負けるのではなく行番号付きで報告する
-atm config tmux.extended-keys true  # 任意：extended-keys on。Shift+Enter などには tmux と端末の対応が必要
+atm config tmux.extended-keys false  # 拡張キーは既定で有効（Shift+Enter など）。これは無効化
 atm config memory.slice-high 20G  # 合計 slice の数値（デフォルト auto = 物理メモリの 50% / 65%）；atm が書いたユニットを書き直し + daemon-reload
 atm config memory.max 8G       # ハード上限：セッションの scope 全体（子プロセス含む）を kill。既定 auto = 物理メモリの 35%・下限 4G
 atm claude --resume <id>       # その cgroup 内で claude を起動；引数はそのまま透過
 claude                         # プレフィックスなし = ネイティブ、制限なし
 ```
 
-`tmux.extended-keys` は引き続き既定で無効。`tmux.extended-keys-format` の既定は `""`
-（管理しない）で、`""`、`xterm`、`csi-u` を選べる。Pi では**稼働中で対応が確認された tmux 3.5+
-サーバー**に対して、それぞれ任意で有効にする：
+`tmux.extended-keys` は既定で有効。`tmux.extended-keys-format` の既定は `auto`：**稼働中で
+対応が確認された tmux 3.5+ サーバー**では `csi-u`（Pi 推奨の形式）を書き、それ以外では形式行を
+書かない。`auto`、`""`（管理しない）、`xterm`、`csi-u` を選べる：
 
 ```bash
-atm config tmux.extended-keys true
-atm config tmux.extended-keys-format csi-u
-atm config --unset tmux.extended-keys-format  # 管理を解除。稼働中の値は戻さない
+atm config tmux.extended-keys-format csi-u    # 明示指定。サーバーが対応を確認したときだけ書く
+atm config tmux.extended-keys-format ""       # 管理を解除。稼働中の値は戻さない
+atm config --unset tmux.extended-keys-format  # auto に戻す
 ```
 
 ATM は公開 CLI（`#{version}` と `show-options`）で**対象サーバー**を調べる。
-PATH のクライアントの `tmux -V` だけでは判断しない。非空形式は対応不明/非対応
+PATH のクライアントの `tmux -V` だけでは判断しない。明示的な `xterm`/`csi-u` は対応不明/非対応
 （稼働中のサーバーがない場合も含む）なら、TOML 保存や tmux ブロック変更前に拒否する。
 tmux 3.2–3.4 では `extended-keys on` だけを使う。3.4 は形式オプションに非対応だが、
 Pi は従来の xterm `modifyOtherKeys` に対応する。ATM は `always` や端末機能のワイルドカードを強制しない。

@@ -92,11 +92,11 @@ atm install     # ~/.tmux.conf にキーバインドを書き + resurrect/contin
 
 表示言語はシステムの locale に従う（日 / 英 / 中）、`ATM_LANG=ja|en|zh` で強制可。
 
-修飾キーのサポートは任意：`atm config tmux.extended-keys true` で管理ブロックに
-`extended-keys on` を書き、live 適用後に読取値を確認する。引き続き既定では無効。
-独立した `tmux.extended-keys-format` の既定は `""`（管理しない）。稼働中の tmux 3.5+ が
-公開バージョン/オプション検査で対応確認された場合だけ `csi-u` または `xterm` を指定できる。
-不明/非対応なら保存前に拒否する。tmux 3.4 は従来の `extended-keys on` のみで、形式行は書かない。
+修飾キーのサポートは既定で有効：管理ブロックに `extended-keys on` を書き、live 適用後に読取値を
+確認する（Pi や Claude Code の Shift+Enter などに必要）。独立した `tmux.extended-keys-format` の
+既定は `auto`：稼働中の tmux 3.5+ が公開バージョン/オプション検査で対応確認されれば `csi-u`、
+そうでなければ形式行を書かない（tmux 3.4 は設定ファイルのこの行を受け付けない）。明示的な `csi-u`
+や `xterm` は対応不明/非対応なら保存前に拒否する。`""` は管理しない、`tmux.extended-keys false` で無効化。
 検査するのは対象サーバーであり PATH のクライアントのバージョンではない。
 無効化は ATM の行だけを削除し live 値を維持する。警告を消すためサーバーを再起動しない。
 外側の端末/クライアントの修飾キー能力は未検証で、設定成功は実際の Shift+Enter 動作を証明しない。
