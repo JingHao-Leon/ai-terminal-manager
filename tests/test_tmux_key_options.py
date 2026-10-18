@@ -11,6 +11,16 @@ import pytest
 from atm import cli, config, config_tui, install, sync, tmux, tmuxopts
 
 
+def off(**overrides):
+    """Every atm tmux option off — the baseline these tests were written against.
+
+    Extended keys default on since 2026-10-18; tests about other options pin them off.
+    """
+    return config.Config(
+        **{"tmux_extended_keys": False, "tmux_extended_keys_format": "", **overrides}
+    )
+
+
 @pytest.fixture
 def server(monkeypatch):
     values = {"version": "3.5", "extended-keys": "off", "extended-keys-format": "xterm"}
@@ -42,11 +52,11 @@ def conf(tmp_path):
     return path
 
 
-@pytest.mark.parametrize("value", ["", "xterm", "csi-u"])
+@pytest.mark.parametrize("value", ["auto", "", "xterm", "csi-u"])
 def test_format_config_roundtrip_env_unset(tmp_path, monkeypatch, value):
     key = "tmux.extended-keys-format"
-    assert config.Config().tmux_extended_keys_format == ""
-    cfg = config.set_value(config.Config(), key, value)
+    assert off().tmux_extended_keys_format == ""
+    cfg = config.set_value(off(), key, value)
     path = tmp_path / "config.toml"
     config.save(cfg, path)
     assert config.load_file(path).tmux_extended_keys_format == value
@@ -54,13 +64,13 @@ def test_format_config_roundtrip_env_unset(tmp_path, monkeypatch, value):
     loaded, sources = config.load_with_sources(path)
     assert loaded.tmux_extended_keys_format == "xterm"
     assert sources[key] == "env ATM_TMUX_EXTENDED_KEYS_FORMAT"
-    assert config.unset_value(cfg, key).tmux_extended_keys_format == ""
+    assert config.unset_value(cfg, key).tmux_extended_keys_format == "auto"  # the default
 
 
 @pytest.mark.parametrize("value", ["always", "kitty", "CSI-U", "xterm; run-shell bad", True])
 def test_format_enum_rejects_invalid(value):
     with pytest.raises(config.ConfigError):
-        config.set_value(config.Config(), "tmux.extended-keys-format", value)
+        config.set_value(off(), "tmux.extended-keys-format", value)
 
 
 @pytest.mark.parametrize("version", ["3.5", "3.5a", "3.6", "4.0"])
@@ -68,7 +78,7 @@ def test_supported_server_format_render_apply_rebuild_remove(conf, server, versi
     values, calls = server
     values["version"] = version
     original = conf.read_text()
-    cfg = config.Config(tmux_extended_keys=True, tmux_extended_keys_format="csi-u")
+    cfg = off(tmux_extended_keys=True, tmux_extended_keys_format="csi-u")
     plan = tmuxopts.build_plan(cfg, conf_path=conf)
     assert plan.block.splitlines()[1:-1] == [
         "set -g extended-keys on",
@@ -82,7 +92,7 @@ def test_supported_server_format_render_apply_rebuild_remove(conf, server, versi
     assert rebuilt.is_noop
     assert tmuxopts.apply(rebuilt).backup_path is None
     calls.clear()
-    disabled = tmuxopts.apply(tmuxopts.build_plan(config.Config(), conf_path=conf))
+    disabled = tmuxopts.apply(tmuxopts.build_plan(off(), conf_path=conf))
     assert disabled.disabled == ("extended-keys", "extended-keys-format")
     assert conf.read_text() == original and calls == []
     tmuxopts.apply(tmuxopts.build_plan(cfg, conf_path=conf))
@@ -97,7 +107,7 @@ def test_unsupported_unknown_version_refuses_before_backup(conf, server, version
     values["version"] = version
     before = conf.read_text()
     with pytest.raises(config.ConfigError, match="extended-keys-format"):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="csi-u"), conf_path=conf)
+        tmuxopts.build_plan(off(tmux_extended_keys_format="csi-u"), conf_path=conf)
     assert conf.read_text() == before
     assert not list(conf.parent.glob("tmux.conf.bak*"))
     assert not any(c[0] == "set-option" for c in calls)
@@ -112,25 +122,24 @@ def test_capability_failure_unknown_even_with_new_version(conf, server):
         and status.cause is tmux.KeyOptionsCause.FORMAT_UNCONFIRMED
     )
     with pytest.raises(config.ConfigError):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="xterm"), conf_path=conf)
+        tmuxopts.build_plan(off(tmux_extended_keys_format="xterm"), conf_path=conf)
 
 
 def test_no_server_refuses_nonempty_but_default_and_bool_still_work(conf, monkeypatch):
     monkeypatch.setattr(tmux, "has_server", lambda: False)
     assert tmux.key_options_status().format_support == "unknown"
     with pytest.raises(config.ConfigError):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="csi-u"), conf_path=conf)
-    assert tmuxopts.build_plan(config.Config(), conf_path=conf).block == ""
-    result = tmuxopts.apply(
-        tmuxopts.build_plan(config.Config(tmux_extended_keys=True), conf_path=conf)
-    )
-    assert result.written and not result.applied_live and result.live_error
+        tmuxopts.build_plan(off(tmux_extended_keys_format="csi-u"), conf_path=conf)
+    assert tmuxopts.build_plan(off(), conf_path=conf).block == ""
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_extended_keys=True), conf_path=conf))
+    # Plain extended-keys (tmux 3.2+) takes effect at the next server start: no error.
+    assert result.written and not result.applied_live and result.live_error is None
     assert "extended-keys-format" not in conf.read_text()
 
 
 def test_apply_reprobes_before_any_mutation(conf, server):
     values, calls = server
-    plan = tmuxopts.build_plan(config.Config(tmux_extended_keys_format="csi-u"), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_extended_keys_format="csi-u"), conf_path=conf)
     values["version"] = "3.4"
     before = conf.read_text()
     with pytest.raises(config.ConfigError):
@@ -141,7 +150,7 @@ def test_apply_reprobes_before_any_mutation(conf, server):
 
 def test_failed_backup_never_sets_live(conf, server, monkeypatch):
     _values, calls = server
-    plan = tmuxopts.build_plan(config.Config(tmux_extended_keys_format="csi-u"), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_extended_keys_format="csi-u"), conf_path=conf)
     before = conf.read_text()
 
     def fail(path):
@@ -161,14 +170,14 @@ def test_outside_format_conflicts_preserved_with_current_line_numbers(conf, serv
         "bind R { set -g extended-keys-format xterm }\n"
     )
     conf.write_text(foreign)
-    cfg = config.Config(tmux_extended_keys_format="csi-u")
+    cfg = off(tmux_extended_keys_format="csi-u")
     plan = tmuxopts.build_plan(cfg, conf_path=conf)
     assert [c.certain for c in plan.conflicts] == [True, False, False, False]
     result = tmuxopts.apply(plan)
     assert conf.read_text().endswith(foreign)
     for c in result.conflicts:
         assert conf.read_text().splitlines()[c.line_no - 1].strip() == c.text
-    released = tmuxopts.apply(tmuxopts.build_plan(config.Config(), conf_path=conf))
+    released = tmuxopts.apply(tmuxopts.build_plan(off(), conf_path=conf))
     assert len(released.released) == 4 and conf.read_text() == foreign
 
 
@@ -194,8 +203,8 @@ def test_live_failure_preserves_saved_file_and_reports_unconfirmed(
         return original_run(args, **kw)
 
     monkeypatch.setattr(tmux, "run", run)
-    cfg = config.Config(tmux_extended_keys=True, tmux_extended_keys_format="csi-u")
-    notes = sync.apply_changes(config.Config(), cfg, conf_path=conf)
+    cfg = off(tmux_extended_keys=True, tmux_extended_keys_format="csi-u")
+    notes = sync.apply_changes(off(), cfg, conf_path=conf)
     assert any("已写进" in n for n in notes)
     assert any("失败" in n for n in notes)
     assert not any("已对运行中的 server 生效" in n for n in notes)
@@ -207,7 +216,7 @@ def test_cli_editor_preflight_preserves_both_files_on_refusal(conf, server, monk
     values["version"] = "3.4"
     config_path = conf.parent / "config.toml"
     monkeypatch.setenv("ATM_CONFIG", str(config_path))
-    cfg = config.Config(keys_conf_path=str(conf))
+    cfg = off(keys_conf_path=str(conf))
     config.save(cfg)
     before = config_path.read_text(), conf.read_text()
     assert cli.main(["config", "tmux.extended-keys-format", "csi-u"]) == cli.EXIT_ERROR
@@ -226,7 +235,7 @@ def test_cli_editor_preflight_preserves_both_files_on_refusal(conf, server, monk
 
 def test_preflight_unrelated_edits_and_format_release_never_probe(server):
     _values, calls = server
-    old = config.Config(tmux_extended_keys_format="csi-u")
+    old = off(tmux_extended_keys_format="csi-u")
     sync.validate_changes(old, replace(old, memory_high="4G"))
     sync.validate_changes(old, replace(old, tmux_extended_keys_format=""))
     assert calls == []
@@ -237,7 +246,7 @@ def test_install_refuses_before_keys_or_config_write(conf, server, monkeypatch, 
     values["version"] = "3.4"
     config_path = conf.parent / "config.toml"
     monkeypatch.setenv("ATM_CONFIG", str(config_path))
-    config.save(config.Config(tmux_extended_keys_format="csi-u"))
+    config.save(off(tmux_extended_keys_format="csi-u"))
     before = config_path.read_text(), conf.read_text()
     assert (
         cli.main(["install", "--conf", str(conf), "--no-persist", "--no-slice", "-y"])
@@ -277,7 +286,7 @@ def test_cli_format_partial_failure_exits_nonzero_but_preserves_both_saves(
     values, _calls = server
     config_path = conf.parent / "config.toml"
     monkeypatch.setenv("ATM_CONFIG", str(config_path))
-    config.save(config.Config(keys_conf_path=str(conf)))
+    config.save(off(keys_conf_path=str(conf)))
     original_run = tmux.run
     wrote = False
 
@@ -306,7 +315,7 @@ def test_cli_format_partial_failure_exits_nonzero_but_preserves_both_saves(
 
 def test_editor_saved_format_partial_failure_has_nonzero_exit(conf, server, monkeypatch):
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-    cfg = config.Config(keys_conf_path=str(conf))
+    cfg = off(keys_conf_path=str(conf))
     editor = config_tui.ConfigEditor(cfg, {})
     editor._cursor = list(config.KEYS).index("tmux.extended-keys-format")
     editor.handle_key("\n")
@@ -330,7 +339,7 @@ def test_cli_unrelated_saved_unsupported_format_does_not_probe(conf, server, mon
     values, calls = server
     values["version"] = "3.4"
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-    config.save(config.Config(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u"))
+    config.save(off(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u"))
     assert cli.main(["config", "memory.high", "4G"]) == cli.EXIT_OK
     assert config.load_file().memory_high == "4G" and calls == []
 
@@ -341,7 +350,7 @@ def test_option_probe_unrecognized_value_is_unknown(conf, server, bad):
     values["extended-keys-format"] = bad
     assert tmux.key_options_status().format_support == "unknown"
     with pytest.raises(config.ConfigError):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="xterm"), conf_path=conf)
+        tmuxopts.build_plan(off(tmux_extended_keys_format="xterm"), conf_path=conf)
 
 
 def test_version_query_failure_is_unknown(conf, server, monkeypatch):
@@ -357,21 +366,24 @@ def test_version_query_failure_is_unknown(conf, server, monkeypatch):
     assert status.server_version is None and status.format_support == "unknown"
     assert status.cause is tmux.KeyOptionsCause.VERSION_UNCONFIRMED
     with pytest.raises(config.ConfigError):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="csi-u"), conf_path=conf)
+        tmuxopts.build_plan(off(tmux_extended_keys_format="csi-u"), conf_path=conf)
 
 
 def test_format_reset_uses_original_conf_without_server_probe(conf, server, monkeypatch):
     _values, calls = server
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
     original = conf.read_text()
-    cfg = config.Config(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u")
+    cfg = off(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u")
     config.save(cfg)
     tmuxopts.apply(tmuxopts.build_plan(cfg, conf_path=conf))
     calls.clear()
     monkeypatch.setattr(tmux, "has_server", lambda: False)
     assert cli.main(["config", "--reset"]) == cli.EXIT_OK
     assert not config.config_path().exists()
-    assert conf.read_text() == original and calls == []
+    # Reset writes the defaults without probing a server: extended keys on, no format.
+    default_block = tmuxopts.build_plan(config.Config(), conf_path=conf.parent / "probe.conf").block
+    assert default_block.splitlines()[1:-1] == ["set -g extended-keys on"]
+    assert conf.read_text() == f"{default_block}\n\n{original}" and calls == []
 
 
 def test_doctor_json_includes_actual_server_key_status(conf, server, monkeypatch, capsys):
@@ -408,7 +420,7 @@ def test_install_format_partial_failure_exits_nonzero_without_rollback(
     values, calls = server
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
     monkeypatch.setattr(install, "resolve_atm_command", lambda: "/fixture/atm")
-    config.save(config.Config(tmux_extended_keys_format="csi-u"))
+    config.save(off(tmux_extended_keys_format="csi-u"))
     original_run = tmux.run
 
     def run(args, **kw):
@@ -447,7 +459,7 @@ def test_missing_tmux_never_probes_or_writes_format(conf, monkeypatch):
     before = conf.read_text()
     assert tmux.key_options_status().format_support == "unknown"
     with pytest.raises(config.ConfigError):
-        tmuxopts.build_plan(config.Config(tmux_extended_keys_format="xterm"), conf_path=conf)
+        tmuxopts.build_plan(off(tmux_extended_keys_format="xterm"), conf_path=conf)
     assert conf.read_text() == before and not list(conf.parent.glob("tmux.conf.bak*"))
 
 
@@ -457,7 +469,7 @@ def test_cli_identical_retry_after_failed_save_confirms_actual_request(
 ):
     values, calls = server
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-    config.save(config.Config(keys_conf_path=str(conf)))
+    config.save(off(keys_conf_path=str(conf)))
     original_run = tmux.run
     state = {"mode": "set", "wrote": False}
 
@@ -531,7 +543,7 @@ def test_probe_doctor_and_preflight_never_disclose_subprocess_sentinel(
     assert SENTINEL not in capsys.readouterr().out
     if status.format_support != "supported":
         monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-        config.save(config.Config(keys_conf_path=str(conf)))
+        config.save(off(keys_conf_path=str(conf)))
         assert cli.main(["config", "tmux.extended-keys-format", "csi-u"]) == cli.EXIT_ERROR
         assert SENTINEL not in capsys.readouterr().err
         editor = config_tui.ConfigEditor(config.load_file(), {})
@@ -550,7 +562,7 @@ def test_saved_unconfirmed_cli_editor_install_never_disclose_sentinel(
 ):
     values, _calls = server
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-    config.save(config.Config(keys_conf_path=str(conf)))
+    config.save(off(keys_conf_path=str(conf)))
     original_run = tmux.run
     state = {"wrote": False}
 
@@ -628,7 +640,7 @@ def test_editor_identical_format_confirmation_refuses_before_save_when_server_mi
     conf, server, monkeypatch
 ):
     monkeypatch.setenv("ATM_CONFIG", str(conf.parent / "config.toml"))
-    cfg = config.Config(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u")
+    cfg = off(keys_conf_path=str(conf), tmux_extended_keys_format="csi-u")
     config.save(cfg)
     before = config.config_path().read_bytes(), conf.read_bytes()
     editor = config_tui.ConfigEditor(cfg, {})
@@ -639,3 +651,64 @@ def test_editor_identical_format_confirmation_refuses_before_save_when_server_mi
     assert editor.handle_key("s") == config_tui.Action.NONE
     assert (config.config_path().read_bytes(), conf.read_bytes()) == before
     assert not list(conf.parent.glob("tmux.conf.bak*"))
+
+
+# --- Defaults (2026-10-18): extended keys on, format "auto" -----------------------------
+
+
+@pytest.mark.parametrize("version", ["3.5", "3.5a", "3.6", "4.0"])
+def test_auto_format_uses_csi_u_where_supported(conf, server, version):
+    values, calls = server
+    values["version"] = version
+    plan = tmuxopts.build_plan(config.Config(), conf_path=conf)
+    assert plan.block.splitlines()[1:-1] == [
+        "set -g extended-keys on",
+        "set -g extended-keys-format csi-u",
+    ]
+    result = tmuxopts.apply(plan)
+    assert result.written and result.applied_live and result.live_error is None
+    assert ["set-option", "-g", "extended-keys-format", "csi-u"] in calls
+
+
+def test_auto_format_writes_nothing_on_tmux_3_4(conf, server):
+    # tmux 3.4 rejects an unknown option line in its config file at startup.
+    values, _calls = server
+    values["version"] = "3.4"
+    plan = tmuxopts.build_plan(config.Config(), conf_path=conf)
+    assert plan.block.splitlines()[1:-1] == ["set -g extended-keys on"]
+
+
+def test_auto_format_writes_nothing_without_a_server(conf, monkeypatch):
+    monkeypatch.setattr(tmux, "has_server", lambda: False)
+    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(), conf_path=conf))
+    text = conf.read_text()
+    assert "set -g extended-keys on" in text and "extended-keys-format" not in text
+    assert result.written and result.live_error is None  # applies at next server start
+
+
+def test_default_install_without_server_succeeds(tmp_path, monkeypatch):
+    from atm import guard
+
+    conf = tmp_path / "tmux.conf"
+    monkeypatch.setenv("ATM_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setattr(guard, "unit_dir", lambda: tmp_path / "units")
+    monkeypatch.setattr(guard, "_daemon_reload", lambda: None)
+    monkeypatch.setattr(tmux, "has_server", lambda: False)
+    assert (
+        cli.main(["install", "-y", "--no-persist", "--no-slice", "--conf", str(conf)])
+        == cli.EXIT_OK
+    )
+    text = conf.read_text()
+    assert "set -g extended-keys on" in text and "extended-keys-format" not in text
+
+
+def test_auto_never_blocks_saving_config(tmp_path, monkeypatch):
+    # Explicit formats refuse to save when the server can't confirm support; auto must not.
+    monkeypatch.setattr(tmux, "has_server", lambda: False)
+    monkeypatch.setenv("ATM_CONFIG", str(tmp_path / "config.toml"))
+    assert config.explicit_key_format("csi-u") and config.explicit_key_format("xterm")
+    assert not config.explicit_key_format("auto") and not config.explicit_key_format("")
+    old = config.set_value(off(), "tmux.extended-keys-format", "")
+    sync.validate_changes(
+        old, config.set_value(old, "tmux.extended-keys-format", "auto"), format_requested=True
+    )

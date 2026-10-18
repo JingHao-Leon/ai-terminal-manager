@@ -8,6 +8,17 @@ import pytest
 
 from atm import config, tmux, tmuxopts
 
+
+def off(**overrides):
+    """Every atm tmux option off — the baseline these tests were written against.
+
+    Extended keys default on since 2026-10-18; tests about other options pin them off.
+    """
+    return config.Config(
+        **{"tmux_extended_keys": False, "tmux_extended_keys_format": "", **overrides}
+    )
+
+
 USER = "# mine\nset -g status off\n"
 
 
@@ -32,7 +43,7 @@ def live(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 def test_nothing_enabled_writes_nothing(conf: Path, live) -> None:
-    plan = tmuxopts.build_plan(config.Config(), conf_path=conf)
+    plan = tmuxopts.build_plan(off(), conf_path=conf)
     assert plan.is_noop and plan.block == ""
     result = tmuxopts.apply(plan)
     assert not result.written and not result.applied_live
@@ -41,7 +52,7 @@ def test_nothing_enabled_writes_nothing(conf: Path, live) -> None:
 
 
 def test_block_goes_first_so_user_lines_win(conf: Path, live) -> None:
-    cfg = config.Config(tmux_mouse=True)
+    cfg = off(tmux_mouse=True)
     result = tmuxopts.apply(tmuxopts.build_plan(cfg, conf_path=conf))
     text = conf.read_text(encoding="utf-8")
     assert result.written and result.applied_live
@@ -52,7 +63,7 @@ def test_block_goes_first_so_user_lines_win(conf: Path, live) -> None:
 
 
 def test_all_five_options_render(conf: Path, live) -> None:
-    cfg = config.Config(
+    cfg = off(
         tmux_mouse=True,
         tmux_focus_events=True,
         tmux_history_limit=50000,
@@ -80,7 +91,7 @@ def test_all_five_options_render(conf: Path, live) -> None:
 
 
 def test_extended_keys_is_opt_in_and_uninstallable(conf: Path, live) -> None:
-    cfg = config.Config(tmux_extended_keys=True)
+    cfg = off(tmux_extended_keys=True)
     plan = tmuxopts.build_plan(cfg, conf_path=conf)
     assert plan.enabled == ("extended-keys",)
     assert plan.block.splitlines()[1:-1] == ["set -g extended-keys on"]
@@ -91,7 +102,7 @@ def test_extended_keys_is_opt_in_and_uninstallable(conf: Path, live) -> None:
         ["show-options", "-gv", "extended-keys"],
     ]
     live.clear()
-    disabled = tmuxopts.build_plan(config.Config(), conf_path=conf)
+    disabled = tmuxopts.build_plan(off(), conf_path=conf)
     assert disabled.to_turn_off == ("extended-keys",)
     tmuxopts.apply(disabled)
     assert conf.read_text(encoding="utf-8") == USER
@@ -100,7 +111,7 @@ def test_extended_keys_is_opt_in_and_uninstallable(conf: Path, live) -> None:
 
 def test_extended_keys_reports_user_override_without_changing_it(conf: Path, live) -> None:
     conf.write_text("set -g extended-keys off\n", encoding="utf-8")
-    plan = tmuxopts.build_plan(config.Config(tmux_extended_keys=True), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_extended_keys=True), conf_path=conf)
     assert len(plan.conflicts) == 1
     result = tmuxopts.apply(plan)
     assert conf.read_text(encoding="utf-8").endswith("set -g extended-keys off\n")
@@ -108,7 +119,7 @@ def test_extended_keys_reports_user_override_without_changing_it(conf: Path, liv
 
 
 def test_reapply_is_idempotent_and_skips_backup(conf: Path, live, tmp_path: Path) -> None:
-    cfg = config.Config(tmux_mouse=True, tmux_history_limit=50000)
+    cfg = off(tmux_mouse=True, tmux_history_limit=50000)
     tmuxopts.apply(tmuxopts.build_plan(cfg, conf_path=conf))
     backups_before = len(list(tmp_path.glob("tmux.conf.bak*")))
     plan = tmuxopts.build_plan(cfg, conf_path=conf)
@@ -120,8 +131,8 @@ def test_reapply_is_idempotent_and_skips_backup(conf: Path, live, tmp_path: Path
 
 
 def test_changing_a_value_rewrites_block(conf: Path, live) -> None:
-    tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_history_limit=50000), conf_path=conf))
-    plan = tmuxopts.build_plan(config.Config(tmux_history_limit=10000), conf_path=conf)
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_history_limit=50000), conf_path=conf))
+    plan = tmuxopts.build_plan(off(tmux_history_limit=10000), conf_path=conf)
     assert not plan.is_noop and plan.to_turn_off == ()
     tmuxopts.apply(plan)
     text = conf.read_text(encoding="utf-8")
@@ -130,11 +141,9 @@ def test_changing_a_value_rewrites_block(conf: Path, live) -> None:
 
 
 def test_turning_one_off_leaves_live_value_alone(conf: Path, live) -> None:
-    tmuxopts.apply(
-        tmuxopts.build_plan(config.Config(tmux_mouse=True, tmux_base_index=1), conf_path=conf)
-    )
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True, tmux_base_index=1), conf_path=conf))
     live.clear()
-    plan = tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf)
+    plan = tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf)
     assert plan.to_turn_off == ("base-index",)
     tmuxopts.apply(plan)
     text = conf.read_text(encoding="utf-8")
@@ -143,8 +152,8 @@ def test_turning_one_off_leaves_live_value_alone(conf: Path, live) -> None:
 
 
 def test_turning_all_off_removes_block(conf: Path, live) -> None:
-    tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
-    plan = tmuxopts.build_plan(config.Config(), conf_path=conf)
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
+    plan = tmuxopts.build_plan(off(), conf_path=conf)
     assert not plan.is_noop and "移除" in plan.describe()
     tmuxopts.apply(plan)
     assert conf.read_text(encoding="utf-8") == USER
@@ -153,7 +162,7 @@ def test_turning_all_off_removes_block(conf: Path, live) -> None:
 
 def test_no_server_means_file_only(conf: Path, monkeypatch) -> None:
     monkeypatch.setattr(tmux, "has_server", lambda: False)
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
     assert result.written and not result.applied_live and result.live_error is None
 
 
@@ -164,12 +173,12 @@ def test_live_failure_is_reported_not_raised(conf: Path, monkeypatch) -> None:
         raise tmux.TmuxError("server gone")
 
     monkeypatch.setattr(tmux, "run", boom)
-    result = tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    result = tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
     assert result.written and not result.applied_live and "server gone" in (result.live_error or "")
 
 
 def test_remove_only_touches_our_block(conf: Path, live) -> None:
-    tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
     removed, backup = tmuxopts.remove(conf)
     assert removed and backup is not None
     assert conf.read_text(encoding="utf-8") == USER
@@ -178,7 +187,7 @@ def test_remove_only_touches_our_block(conf: Path, live) -> None:
 
 def test_empty_conf_gets_just_the_block(tmp_path: Path, live) -> None:
     conf = tmp_path / "new.conf"
-    tmuxopts.apply(tmuxopts.build_plan(config.Config(tmux_mouse=True), conf_path=conf))
+    tmuxopts.apply(tmuxopts.build_plan(off(tmux_mouse=True), conf_path=conf))
     assert conf.read_text(encoding="utf-8") == (
         f"{tmuxopts.MARKER_BEGIN}\nset -g mouse on\n{tmuxopts.MARKER_END}\n"
     )

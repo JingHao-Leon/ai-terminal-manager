@@ -8,6 +8,16 @@ import pytest
 from atm import cli, config, config_tui, dispatch, guard, install, sync, tmux, tmuxopts
 
 
+def off(**overrides):
+    """Every atm tmux option off — the baseline these tests were written against.
+
+    Extended keys default on since 2026-10-18; tests about other options pin them off.
+    """
+    return config.Config(
+        **{"tmux_extended_keys": False, "tmux_extended_keys_format": "", **overrides}
+    )
+
+
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -24,7 +34,7 @@ def isolated(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("args", [["memory.max", "9G"], ["--unset", "memory.max"]])
 def test_config_edit_preserves_file_under_env(isolated, monkeypatch, args):
-    config.save(config.Config(memory_high="3G"))
+    config.save(off(memory_high="3G"))
     monkeypatch.setenv("ATM_MEMORY_HIGH", "7G")
     assert cli.main(["config", *args]) == cli.EXIT_OK
     monkeypatch.delenv("ATM_MEMORY_HIGH")
@@ -33,7 +43,7 @@ def test_config_edit_preserves_file_under_env(isolated, monkeypatch, args):
 
 @pytest.mark.parametrize("edit", ["text", "bool", "reset", "unrelated"])
 def test_editor_preserves_env_markers_and_file_values(isolated, monkeypatch, edit):
-    config.save(config.Config(memory_high="3G"))
+    config.save(off(memory_high="3G"))
     monkeypatch.setenv("ATM_MEMORY_HIGH", "7G")
     monkeypatch.setenv("ATM_MEMORY_ENABLED", "false")
 
@@ -59,12 +69,12 @@ def test_editor_preserves_env_markers_and_file_values(isolated, monkeypatch, edi
     config_tui.run_config_editor()
     monkeypatch.delenv("ATM_MEMORY_HIGH")
     monkeypatch.delenv("ATM_MEMORY_ENABLED")
-    expected = {"text": "5G", "reset": config.Config().memory_high}.get(edit, "3G")
+    expected = {"text": "5G", "reset": off().memory_high}.get(edit, "3G")
     assert config.load().memory_high == expected
 
 
 def test_install_flags_do_not_save_env(isolated, monkeypatch):
-    config.save(config.Config(memory_high="3G"))
+    config.save(off(memory_high="3G"))
     monkeypatch.setenv("ATM_MEMORY_HIGH", "7G")
     assert cli.main(["install", "-y", "--no-persist", "--no-slice", "--key", "s"]) == 0
     monkeypatch.delenv("ATM_MEMORY_HIGH")
@@ -91,9 +101,7 @@ def test_marker_pairs_refuse_malformed_blocks(isolated, module, shape):
 
 
 def test_reset_reconciles_installed_artifacts(isolated, monkeypatch):
-    old = config.Config(
-        keys_pick="s", tmux_mouse=True, memory_slice_high="9G", memory_slice_max="12G"
-    )
+    old = off(keys_pick="s", tmux_mouse=True, memory_slice_high="9G", memory_slice_max="12G")
     config.save(old)
     monkeypatch.setattr(guard, "_daemon_reload", lambda: None)
     monkeypatch.setattr(dispatch, "memory_limits_available", lambda: True)
@@ -105,8 +113,9 @@ def test_reset_reconciles_installed_artifacts(isolated, monkeypatch):
     assert not config.config_path().exists()
     conf = (isolated / ".tmux.conf").read_text()
     assert "bind-key a " in conf and "bind-key s " not in conf
-    assert tmuxopts.MARKER_BEGIN not in conf
-    assert guard.status(old.memory_slice).high == guard.resolve_totals(config.Config())[0]
+    # Reset returns to defaults: mouse is gone, extended keys (default on) remain.
+    assert "set -g mouse on" not in conf and "set -g extended-keys on" in conf
+    assert guard.status(old.memory_slice).high == guard.resolve_totals(off())[0]
 
 
 def test_install_records_conf_path_for_sync_and_reset(isolated):
@@ -119,14 +128,15 @@ def test_install_records_conf_path_for_sync_and_reset(isolated):
     assert tmuxopts.MARKER_BEGIN in conf.read_text()
     assert cli.main(["config", "--reset"]) == 0
     assert "bind-key a " in conf.read_text()
-    assert tmuxopts.MARKER_BEGIN not in conf.read_text()
+    text = conf.read_text()  # defaults again: mouse gone, extended keys on
+    assert "set -g mouse on" not in text and "set -g extended-keys on" in text
     assert not (isolated / ".tmux.conf").exists()
 
 
 @pytest.mark.parametrize("failure", [None, "backup", "bind"])
 def test_sync_rebinds_before_unbinding(isolated, monkeypatch, failure):
     conf = isolated / ".tmux.conf"
-    old = config.Config()
+    old = off()
     install.apply(install.build_plan(cfg=old))
     calls = []
     monkeypatch.setattr(tmux, "has_server", lambda: True)
@@ -197,7 +207,7 @@ def test_reload_failure_reports_written_file(isolated, monkeypatch, capsys, mode
         return subprocess.CompletedProcess(args, 1, "", "reload denied")
 
     monkeypatch.setattr(guard.subprocess, "run", run)
-    cfg = config.Config(memory_slice_high="7G", memory_slice_max="9G")
+    cfg = off(memory_slice_high="7G", memory_slice_max="9G")
     if entry == "install":
         cli._apply_slice(cfg)
         notes = capsys.readouterr().out
@@ -205,7 +215,7 @@ def test_reload_failure_reports_written_file(isolated, monkeypatch, capsys, mode
         path = guard.unit_dir() / cfg.memory_slice
         path.parent.mkdir(parents=True)
         path.write_text(guard.unit_text(high="3G", max_="4G"))
-        notes = " ".join(sync.apply_changes(config.Config(), cfg))
+        notes = " ".join(sync.apply_changes(off(), cfg))
     assert guard.status(cfg.memory_slice).high == "7G"
     assert "文件已写入，重载失败：" in notes
     assert "已写总量闸门" not in notes and "总量闸门单元没写" not in notes
@@ -219,7 +229,7 @@ def test_no_systemctl_is_success_not_a_reload_failure(isolated, monkeypatch, cap
     monkeypatch.setattr(
         guard.subprocess, "run", lambda *a, **k: pytest.fail("没有 systemctl 就不该去跑它")
     )
-    cfg = config.Config(memory_slice_high="7G", memory_slice_max="9G")
+    cfg = off(memory_slice_high="7G", memory_slice_max="9G")
     if entry == "install":
         cli._apply_slice(cfg)
         notes = capsys.readouterr().out
@@ -227,7 +237,7 @@ def test_no_systemctl_is_success_not_a_reload_failure(isolated, monkeypatch, cap
         path = guard.unit_dir() / cfg.memory_slice
         path.parent.mkdir(parents=True)
         path.write_text(guard.unit_text(high="3G", max_="4G"))
-        notes = " ".join(sync.apply_changes(config.Config(), cfg))
+        notes = " ".join(sync.apply_changes(off(), cfg))
     assert guard.status(cfg.memory_slice).high == "7G"
     assert "重载失败" not in notes
 
@@ -251,13 +261,13 @@ def test_disabling_tmux_option_preserves_live_user_value(isolated, monkeypatch, 
     conf = isolated / ".tmux.conf"
     user = "set -g mouse on\nset -g history-limit 80000\nset -g base-index 3\n"
     conf.write_text(user)
-    old = replace(config.Config(), **{field: value})
+    old = replace(off(), **{field: value})
     tmuxopts.apply(tmuxopts.build_plan(old))
     calls = []
     monkeypatch.setattr(tmux, "run", lambda args: calls.append(args))
     monkeypatch.setattr(tmux, "has_server", lambda: True)
 
-    notes = sync.apply_changes(old, config.Config())
+    notes = sync.apply_changes(old, off())
     joined = "\n".join(notes)
 
     assert calls == []  # 不拿硬编码的默认值去覆盖运行中的值
@@ -286,12 +296,12 @@ def test_system_manager_refuses_aggregate_install(isolated, monkeypatch, capsys,
     monkeypatch.setattr(
         guard, "_daemon_reload", lambda: pytest.fail("system mode must not reload user manager")
     )
-    cfg = config.Config(memory_user=False)
+    cfg = off(memory_user=False)
     assert "memory.user=false" in guard.describe_plan(cfg)
     cli._apply_slice(cfg)
     assert "memory.user=false" in capsys.readouterr().out
     assert not guard.unit_dir().exists()
-    notes = sync.apply_changes(config.Config(), cfg)
+    notes = sync.apply_changes(off(), cfg)
     assert any("memory.user=false" in n for n in notes)
     with pytest.raises(RuntimeError, match=r"memory\.user=false"):
         guard.sync(cfg)
@@ -306,7 +316,7 @@ def test_uninstall_uses_recorded_conf_path(isolated):
 
 
 def test_options_noop_still_refuses_unpaired_second_block(isolated):
-    cfg = config.Config(tmux_mouse=True)
+    cfg = off(tmux_mouse=True)
     conf = isolated / ".tmux.conf"
     tmuxopts.apply(tmuxopts.build_plan(cfg))
     before = conf.read_text() + tmuxopts.MARKER_BEGIN + "\nuser content\n"
@@ -334,7 +344,7 @@ def test_uninstall_reports_reload_failure_without_losing_the_summary(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     """删完了但 daemon-reload 失败：仍要告诉用户删了哪些块，再附一句实情。"""
-    from atm import cli, config, guard, install
+    from atm import cli, guard, install
 
     conf = tmp_path / "tmux.conf"
     conf.write_text("set -g status off\n", encoding="utf-8")
@@ -343,7 +353,7 @@ def test_uninstall_reports_reload_failure_without_losing_the_summary(
     monkeypatch.setattr(guard, "_daemon_reload", lambda: None)
     monkeypatch.setattr(cli.tmux, "has_server", lambda: False)
     monkeypatch.setattr(cli.tmux, "is_installed", lambda: True)
-    install.apply(install.build_plan(cfg=config.Config(), conf_path=conf), live=False)
+    install.apply(install.build_plan(cfg=off(), conf_path=conf), live=False)
     guard.install("atm-ai.slice", tmp_path / "units", total_bytes=8 << 30)
     capsys.readouterr()
 

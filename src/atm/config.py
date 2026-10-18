@@ -80,8 +80,13 @@ class Config:
     # 的独立 marker 块（用户后面自己写的任何一行都能盖掉它），并对活着的 server 立即生效。
     tmux_mouse: bool = False
     tmux_focus_events: bool = False
-    tmux_extended_keys: bool = False
-    tmux_extended_keys_format: str = ""  # 空串 = 不接管；非空写入前须确认 server 支持
+    # 扩展组合键默认开：Pi / Claude Code 等 TUI 的 Shift+Enter 需要它
+    # （2026-10-08 用户要求作为默认）。
+    tmux_extended_keys: bool = True
+    # "auto" = 运行中的 tmux 支持（3.5+）就用 csi-u，否则不写；tmux 3.4 不认这个选项，
+    # 写进配置文件会让 server 启动报错。空串 = 不接管；
+    # xterm / csi-u = 显式指定（写入前仍须确认支持）。
+    tmux_extended_keys_format: str = "auto"
     tmux_history_limit: int = 0  # 0 = 不写；常用 50000（tmux 默认 2000）
     tmux_base_index: int = 0  # 0 = 不写；1 = window / pane 都从 1 开始编号
     tmux_renumber_windows: bool = False
@@ -154,9 +159,9 @@ _HELP: dict[str, str] = {
     "keys.popup-height": "选择器浮层高度，给 display-popup -h（如 70% 或 40）",
     "tmux.mouse": "tmux 鼠标：点格子切焦点、滚轮翻滚动缓冲、拖边框调大小（写进 ~/.tmux.conf）",
     "tmux.focus-events": "tmux 把终端的焦点进出转给程序（编辑器自动重载、AI CLI 感知切窗要它）",
-    "tmux.extended-keys": "扩展组合键（如 Shift+Enter）；需 tmux 和终端支持。默认不写",
+    "tmux.extended-keys": "扩展组合键（如 Shift+Enter）；需 tmux 和终端支持。默认开",
     "tmux.extended-keys-format": (
-        "扩展键编码：空串不接管，xterm 或 csi-u；写入前须确认运行中的 tmux 3.5+ 支持"
+        "扩展键编码：auto（默认，tmux 3.5+ 用 csi-u，否则不写）、空串不接管、xterm 或 csi-u"
     ),
     "tmux.history-limit": "每格滚动缓冲行数；0 = 不写（tmux 默认 2000），常用 50000",
     "tmux.base-index": "window / pane 编号起点；0 = 不写（tmux 从 0 数），1 = 从 1 开始",
@@ -168,6 +173,13 @@ _HELP: dict[str, str] = {
 
 class ConfigError(ValueError):
     pass
+
+
+def explicit_key_format(value: str) -> bool:
+    """用户明确要求了一种扩展键格式（xterm / csi-u）。"auto" 和空串都不算：
+    它们从不要求 server 现场确认，也不因 server 不支持而阻塞保存。
+    """
+    return value not in ("", "auto")
 
 
 ENV_PREFIX = "ATM_"
@@ -397,9 +409,11 @@ def _coerce(key: str, value: object):
         return n
     s = str(value).strip()
     if key == "tmux.extended-keys-format":
-        if not isinstance(value, str) or s not in ("", "xterm", "csi-u"):
+        if not isinstance(value, str) or s not in ("auto", "", "xterm", "csi-u"):
             raise ConfigError(
-                _("{key} 只能是空串、xterm 或 csi-u，收到 {value!r}").format(key=key, value=value)
+                _("{key} 只能是 auto、空串、xterm 或 csi-u，收到 {value!r}").format(
+                    key=key, value=value
+                )
             )
         return s
     if key == "keys.conf-path":

@@ -46,7 +46,7 @@ def _changed(old: config_mod.Config, new: config_mod.Config, names: tuple[str, .
 def requires_format_confirmation(
     old: config_mod.Config, new: config_mod.Config, *, format_requested: bool = False
 ) -> bool:
-    return bool(new.tmux_extended_keys_format) and (
+    return config_mod.explicit_key_format(new.tmux_extended_keys_format) and (
         format_requested or _changed(old, new, _TMUX_FIELDS)
     )
 
@@ -113,7 +113,7 @@ def _sync_tmux_options(cfg: config_mod.Config, conf_path: Path | None) -> SyncRe
                     path=conf_path or Path.home() / ".tmux.conf", exc=exc
                 ),
             ),
-            False if cfg.tmux_extended_keys_format else None,
+            False if config_mod.explicit_key_format(cfg.tmux_extended_keys_format) else None,
         )
     notes: list[str] = []
     if result.written:
@@ -127,7 +127,9 @@ def _sync_tmux_options(cfg: config_mod.Config, conf_path: Path | None) -> SyncRe
     notes += tmuxopts.report_lines(result)
     return SyncResult(
         tuple(n for n in notes if n),
-        result.applied_live if cfg.tmux_extended_keys_format else None,
+        result.applied_live
+        if config_mod.explicit_key_format(cfg.tmux_extended_keys_format)
+        else None,
     )
 
 

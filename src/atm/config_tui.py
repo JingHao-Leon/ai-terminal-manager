@@ -230,7 +230,9 @@ class ConfigEditor(_Screen):
     def _record_edit(self, row: Row, source: str = "file") -> None:
         self._file_cfg = replace(self._file_cfg, **{row.field: getattr(self._cfg, row.field)})
         if row.key == "tmux.extended-keys-format":
-            self._format_requested = bool(self._file_cfg.tmux_extended_keys_format)
+            self._format_requested = config.explicit_key_format(
+                self._file_cfg.tmux_extended_keys_format
+            )
         if not self.env_override(row):
             self._sources[row.key] = source
 
